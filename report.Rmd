@@ -1,0 +1,281 @@
+---
+title: "ML Project: Biomechanical Patient Features"
+author: "Lorenzo Luna"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#use readr to import dataset
+if (!require(readr)) install.packages('readr')
+library(readr)
+#read dataset
+dataset = read_csv('./column_3C_weka.csv')
+#load libraries
+if (!require(tidyverse)) install.packages('tidyverse')
+library(tidyverse)
+if (!require(caret)) install.packages('caret')
+library(caret)
+if (!require(gtools)) install.packages('caret')
+library(gtools)
+if (!require(caTools)) install.packages('caTools')
+library(caTools)
+if (!require(rpart)) install.packages('rpart')
+library(rpart)
+if (!require(randomForest)) install.packages('randomForest')
+library(randomForest)
+if (!require(kernlab)) install.packages('kernlab')
+library(kernlab)
+```
+
+## Introduction
+
+This project will utilize and compare different machine learning techniques applied to a dataset containing orthopaedic patient data, with the goal of predicting the patient's condition. 
+The dataset used has 310 observations, each corresponding to a patient. Each observation has 6 variables and one class identifier, which is the target of our prediction.
+
+```{r head}
+str(dataset)
+```
+We want the class variable to be a factor instead of a character.
+
+```{r factorize}
+#make class a factor variable
+dataset$class = as.factor(dataset$class)
+```
+
+The dataset used has three classes: Normal, Hernia, and Spondylolisthesis. A version of this dataset merging Hernia and Spondylolisthesis into a single Abnormal class is also available, but I have chosen to work with three classes instead.
+
+This is therefore a multinomial classification problem. Machine learning algorithms that only work on a binomial classification problem (like logistic regression) can be turned into multinomial classifiers by running the algorithm in a One-versus-All way, where the algorithm is trained to identify each class individually, then the class is decided by running all the individual classifiers and picking the prediction with the highest confidence.
+
+It is important to note that the prevalence of Spondylolisthesis is high, while Hernia is the least frequent class. This can affect the overall accuracy of our model.
+
+```{r prevalence}
+dataset %>% group_by(class) %>% summarize(count = n(), prevalence = count/310)
+```
+
+We will run popular machine learning algorithms suitable to solve this problem and compare their performance and stability.
+
+## Method
+
+Exploratory data analysis shows that there is an outlier with an extreme value of degree_spondylolisthesis.
+
+```{r outlier, echo=FALSE}
+dataset %>% ggplot(aes(y = degree_spondylolisthesis)) + geom_boxplot()
+dataset[which.max(dataset$degree_spondylolisthesis),]
+```
+This observation will be discarded while performing future exploratory data analysis, for the sake of making plots more informative. Nonetheless, the observation will still be used as part of the training/test datasets as it still corresponds to a patient's data and must be accounted for.
+
+The dataset is randomly split into training/test datasets, with 30% of the data being kept for testing.
+
+```{r partition}
+index = createDataPartition(dataset$class, p = 0.7, list = FALSE)
+train = dataset[index,]
+test = dataset[-index,]
+```
+
+To begin exploring the training dataset we plot boxplots of class versus all the variables available. We can notice some patterns. Notably, most Normal and Hernia cases have a value of degree_spondylolisthesis close to zero, while most cases of Spondylolisthesis have a much higher value.
+
+```{r boxplots}
+train %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , pelvic_incidence)) + geom_boxplot()
+train %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , pelvic_tilt)) + geom_boxplot()
+train %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , lumbar_lordosis_angle)) + geom_boxplot()
+train %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , sacral_slope)) + geom_boxplot()
+train %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , pelvic_radius)) + geom_boxplot()
+train %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , degree_spondylolisthesis)) + geom_boxplot()
+```
+
+There seems to be a sharp cutoff value after which most cases are Spondylolisthesis. Therefore, any model dividing the decision regions linearly will be sufficiently accurate for classifying these cases. We will try using a classification tree model and analyze its precision depending on the three classes.
+
+To further study the difference between Hernia and Normal cases, exploratory data analysis is performed on a subset of the training dataset only including those cases. Plotting the boxplots of class versus variable shows that it is harder to spot distinctions as clear as the previously found one. There still are some patterns which might be captured by non-linear models like k-nearest neighbors, random forests, and more advanced methods like boosted logistic regression and support vector machines, although it is unreasonable to expect high precision. One such pattern is the fact that Normal cases on average have a higher value of sacral_slope than Hernia cases.
+
+```{r visualization12}
+train_no_spondy = train %>% filter(class != "Spondylolisthesis")
+
+train_no_spondy %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , pelvic_incidence)) + geom_boxplot()
+train_no_spondy %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , pelvic_tilt)) + geom_boxplot()
+train_no_spondy %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , lumbar_lordosis_angle)) + geom_boxplot()
+train_no_spondy %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , sacral_slope)) + geom_boxplot()
+train_no_spondy %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , pelvic_radius)) + geom_boxplot()
+train_no_spondy %>% filter(degree_spondylolisthesis < 400) %>%
+  ggplot(aes(class , degree_spondylolisthesis)) + geom_boxplot()
+```
+Given the high degree of intersectionality between the Normal and Hernia classes, it should be noted that clustering techniques would be ineffective in this situation, although they might be effective at defining a cluster including the Spondylolisthesis class only.
+
+Also note that a Multilayer Perceptron model was trained on the dataset but it achieved less than 50% accuracy. MLP classifiers are useful when trained on higher-dimensional data, like the MNIST dataset.
+
+## Results
+
+We now fit the mentioned machine learning models to the data. At this point it should be noted that, given the relatively low amount of data available, the accuracy of the models has some random variability depending on how we randomly pick the training and test sets. We will later perform a Monte Carlo simulation to better estimate the accuracy of these models. Due to this, my commentary on the model's performance might not be consistent with the output displayed after knitting this report's corresponding R markdown file.
+
+```{r model fitting}
+#fit a classification decision tree
+fit_CART = caret::train(class ~ ., data = train, method = "rpart")
+
+#fit a knn model
+fit_knn = caret::train(class ~ ., data = train, method = "knn",
+                       tuneGrid = data.frame(k = seq(3,33,2)))
+
+#fit a random forest model
+fit_rf = caret::train(class ~ ., data = train, method = "rf")
+
+#fit boosted logistic regression model, a logistic variant of AdaBoost
+fit_logitBoost = caret::train(class ~ ., data = train, method = "LogitBoost")
+
+#fit support vector machine model
+fit_svm = caret::train(class ~ ., data = train, method = "svmLinear",
+                       tuneGrid = data.frame(C = seq(0.01,10,1)))
+```
+
+As expected, using a classification tree model we achieve high sensitivity and specificity to Spondylolisthesis cases. On the other hand, the model suffers from low sensitivity to Hernia and Normal cases which negatively impacts the overall accuracy.
+
+```{r cart}
+#predict using classification tree
+y_CART = predict(fit_CART, newdata = test)
+caret::confusionMatrix(y_CART, reference = test$class)
+```
+It is interesting to display the variable importance determined by the model. As shown, degree_spondylolisthesis is the most important variable for predicting classes.
+
+```{r cartimp}
+#display variable importance
+fit_CART$finalModel$variable.importance
+```
+
+Using a random forest model improves performance. Sensitivity to Hernia and Normal cases remains low, while Spondylolisthesis is predicted with good accuracy. 
+
+```{r rf}
+#predict using random forest
+y_rf = predict(fit_rf, newdata = test)
+caret::confusionMatrix(y_rf, reference = test$class)
+```
+
+Again, degree_spondylolisthesis is the most important variable.
+
+```{r rfvarimp}
+#display variable importance
+fit_rf$finalModel$importance
+```
+
+The K-Nearest Neighbors algorithm achieves results similar to the random forest model. Cross-validation is used to tune the K parameter.
+
+```{r knn}
+#predict using knn
+y_knn = predict(fit_knn, newdata = test)
+caret::confusionMatrix(y_knn, reference = test$class)
+```
+
+This is the cross-validated value picked for K.
+
+```{r k}
+#display best k
+fit_knn$bestTune
+```
+
+The Support Vector Machine model provides slightly improved performance. Accuracy for the Spondylolisthesis class remains high. Cross-validation is used to tune the cost parameter C.
+
+```{r svm}
+#predict using support vector machine
+y_svm = predict(fit_svm, newdata = test)
+caret::confusionMatrix(y_svm, reference = test$class)
+```
+
+This is the cross-validated value picked for C.
+
+```{r svmC}
+#display best C
+fit_svm$bestTune
+```
+
+The Boosted Logistic Regression (LogitBoost) meta-learning model provides a performance similar to the SVM model.
+
+```{r logit}
+#predict using logitBoost
+y_logit = predict(fit_logitBoost, newdata = test)
+caret::confusionMatrix(y_logit, reference = test$class)
+```
+
+As explained before, these accuracy estimates are unstable because the available sample size is low.
+
+To get a better estimate of the accuracy of the models, we will be running a Monte Carlo simulation replicating 100 times the model fitting and prediction. This is a sort of cross-validation, in that we are training and validating the models on random splits of the original dataset. The following function takes in input the dataset and outputs the overall accuracy of the models tested.
+
+```{r montecarlo}
+#this function returns a vector containing the accuracy of the machine learning algorithms
+accuracies = function(dataset){
+  index = createDataPartition(dataset$class, p = 0.7, list = FALSE)
+  
+  train = dataset[index,]
+  test = dataset[-index,]
+  
+  fit_logitBoost = caret::train(class ~ ., data = train, method = "LogitBoost")
+  fit_CART = caret::train(class ~ ., data = train, method = "rpart")
+  fit_knn = caret::train(class ~ ., data = train, method = "knn", tuneGrid = data.frame(k = seq(3,33,2)))
+  fit_rf = caret::train(class ~ ., data = train, method = "rf")
+  fit_svm = caret::train(class ~ ., data = train, method = "svmLinear")
+  
+  y_logit = predict(fit_logitBoost, newdata = test)
+  y_CART = predict(fit_CART, newdata = test)
+  y_knn = predict(fit_knn, newdata = test)
+  y_rf = predict(fit_rf, newdata = test)
+  y_svm = predict(fit_svm, newdata = test)
+  c(
+    caret::confusionMatrix(y_logit, reference = test$class)$overall[[1]],
+    caret::confusionMatrix(y_CART, reference = test$class)$overall[[1]],
+    caret::confusionMatrix(y_knn, reference = test$class)$overall[[1]],
+    caret::confusionMatrix(y_rf, reference = test$class)$overall[[1]],
+    caret::confusionMatrix(y_svm, reference = test$class)$overall[[1]]
+  )
+}
+```
+
+We now run the Monte Carlo simulation. Please note that this takes a while to run.
+
+```{r simulation}
+aggregated_acc = replicate(100, accuracies(dataset))
+```
+
+After running the simulation, we compute and display the mean and standard deviation of the models' accuracy.
+
+```{r accuracy}
+aggregated_acc = t(aggregated_acc)
+colnames(aggregated_acc) = c("LogitBoost", "Classification Tree",
+                             "K-NN", "Random Forest", "Support Vector Machine")
+#report mean accuracy for each model
+mean_acc = t(as.matrix(colMeans(aggregated_acc)))
+rownames(mean_acc) = c("Mean accuracy")
+
+#report standard deviation of accuracy for each model
+acc_sd = t(as.matrix(c(sd(aggregated_acc[,1]), sd(aggregated_acc[,2]),
+                       sd(aggregated_acc[,3]), sd(aggregated_acc[,4]),
+                       sd(aggregated_acc[,5]))))
+colnames(acc_sd) = c("LogitBoost", "Classification Tree", "K-NN",
+                     "Random Forest", "Support Vector Machine")
+rownames(acc_sd) = c("Standard deviation of accuracy")
+
+mean_acc
+acc_sd
+```
+
+The means show that the SVM model performs best, with LogitBoost closely following. The random forest model has a performance slightly better than k-nearest neighbors, but somewhat far from LogitBoost and SVM. The classification tree model performs poorly compared to the others.
+
+As shown, the standard deviation of these estimates is around 0.03 for all the models, therefore our accuracy is relatively unstable. This could be fixed by having more data available.
+
+## Conclusion
+
+We have explored the dataset and identified models capable of predicting the patient's condition given their biomechanical features, while discarding other models which would be ineffective. Given the structure of the data, distinguishing between the Normal and Hernia classes is much harder than detecting the Spondylolisthesis class. The machine learning methods we've used achieve reasonable accuracy, but in medical applications a much higher accuracy is needed for the model to be effective and safely usable because of Bayes' Theorem. The accuracy of our models is unstable due to the low amount of data available and it would be very useful to have more data on Hernia cases, which is the least prevalent class of the dataset.
+
+In the future I aim to continue working on this dataset. 
+
+First of all, merging the Normal and Hernia classes and training the same models to only predict Spondylolisthesis should result in a machine learning algorithm with around 95% accuracy, which is much more suited for use in medical applications.
+
+Second of all, to improve overall accuracy, building an ensemble algorithm might be useful, as well as including additional models in such ensemble.
